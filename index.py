@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from groq import Groq, RateLimitError
+from groq import APIStatusError, Groq, RateLimitError
 from pydantic import BaseModel
 
 from engine import AVAILABLE_TOOLS, TOOLS
@@ -13,7 +13,7 @@ from page import HTML
 from prompts import MASTER_SYSTEM_PROMPT
 
 MODEL_NAME = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1500"))  # keep under Groq's per-minute limit
+MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "3500"))  # keep under Groq's per-minute limit
 # gpt-oss models accept low / medium / high. Low keeps answers fast and token-cheap.
 REASONING_EFFORT = os.environ.get("REASONING_EFFORT") or ("low" if "gpt-oss" in MODEL_NAME else None)
 MAX_HISTORY = 20      # messages kept per request
@@ -34,6 +34,27 @@ class ChatRequest(BaseModel):
 def strip_thinking(text: str) -> str:
     """Remove <think>...</think> blocks some reasoning models emit."""
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
+def wait_text(seconds):
+    """Turn a wait time in seconds into friendly text."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "a minute"
+    if seconds < 60:
+        return f"{max(1, round(seconds))} seconds"
+    if seconds < 3600:
+        m = round(seconds / 60)
+        return f"{m} minute{'s' if m != 1 else ''}"
+    h = round(seconds / 3600, 1)
+    return f"about {h:g} hours"
+
+
+def limit_message(exc):
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    wait = wait_text(headers.get("retry-after")) if headers.get("retry-after") else "a minute"
+    return f"The usage limit has been reached. Please try again in {wait}."
 
 
 def llm_kwargs():
@@ -74,7 +95,10 @@ def chat(req: ChatRequest):
             msg = resp.choices[0].message
 
             if not msg.tool_calls:
-                return {"reply": strip_thinking(msg.content), "filters_used": filters_used}
+                reply = strip_thinking(msg.content)
+                if resp.choices[0].finish_reason == "length":
+                    reply += "\n\n_The reply was cut off. Type \"continue\" to see the rest._"
+                return {"reply": reply, "filters_used": filters_used}
 
             history.append({
                 "role": "assistant",
@@ -103,7 +127,11 @@ def chat(req: ChatRequest):
 
     except HTTPException:
         raise
-    except RateLimitError:
-        raise HTTPException(429, "The assistant is handling too many requests right now. Please wait a minute and try again.")
+    except RateLimitError as e:
+        raise HTTPException(429, limit_message(e))
+    except APIStatusError as e:
+        if e.status_code == 413:
+            raise HTTPException(429, "That request was too big for the current usage limit. Please try again in a minute.")
+        raise HTTPException(502, "The assistant could not answer right now. Please try again.")
     except Exception as e:
         raise HTTPException(502, f"Model request failed: {e}")

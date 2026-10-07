@@ -46,7 +46,7 @@ def extract_field(item, possible_keys, default="N/A"):
 
 
 def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
-                          category=None, search_keyword=None, sort_order=None):
+                          category=None, search_keyword=None, sort_order=None, limit=8):
     """Fetch listings, compute global stats, apply filters, return compact JSON."""
     try:
         response = requests.get(API_ENDPOINT, timeout=12)
@@ -118,23 +118,42 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
 
         fp = [i["price_pkr"] for i in filtered if i["price_pkr"]]
 
+        try:
+            limit = max(1, min(int(limit or 8), 1000))
+        except (TypeError, ValueError):
+            limit = 8
+
+        stats = {
+            "total_matches_for_query": len(filtered),
+            "matched_price_min": format_pkr(min(fp)) if fp else "N/A",
+            "matched_price_max": format_pkr(max(fp)) if fp else "N/A",
+            "matched_price_avg": format_pkr(sum(fp) / len(fp)) if fp else "N/A",
+        }
+        overview = {
+            "total_db_listings": len(normalized_db),
+            "cheapest_listing_overall": format_pkr(min(all_numeric_prices)) if all_numeric_prices else "N/A",
+            "most_expensive_overall": format_pkr(max(all_numeric_prices)) if all_numeric_prices else "N/A",
+            "average_price_overall": format_pkr(sum(all_numeric_prices) / len(all_numeric_prices)) if all_numeric_prices else "N/A",
+        }
+
+        if limit <= 8:
+            return {
+                "global_overview": overview,
+                "listings_per_block_breakdown": dict(block_counter),
+                "listings_per_size_breakdown": dict(size_counter),
+                "category_breakdown": dict(category_counter),
+                "search_query_stats": stats,
+                "top_matching_listings_sample": filtered[:limit],
+            }
+
+        # Full-list mode: compact one-line rows to save tokens
+        rows = [f"{i['id']} | {i['title']} | {i['block']} | {i['size']} | {i['price_formatted']}" for i in filtered[:limit]]
         return {
-            "global_overview": {
-                "total_db_listings": len(normalized_db),
-                "cheapest_listing_overall": format_pkr(min(all_numeric_prices)) if all_numeric_prices else "N/A",
-                "most_expensive_overall": format_pkr(max(all_numeric_prices)) if all_numeric_prices else "N/A",
-                "average_price_overall": format_pkr(sum(all_numeric_prices) / len(all_numeric_prices)) if all_numeric_prices else "N/A",
-            },
-            "listings_per_block_breakdown": dict(block_counter),
-            "listings_per_size_breakdown": dict(size_counter),
-            "category_breakdown": dict(category_counter),
-            "search_query_stats": {
-                "total_matches_for_query": len(filtered),
-                "matched_price_min": format_pkr(min(fp)) if fp else "N/A",
-                "matched_price_max": format_pkr(max(fp)) if fp else "N/A",
-                "matched_price_avg": format_pkr(sum(fp) / len(fp)) if fp else "N/A",
-            },
-            "top_matching_listings_sample": filtered[:8],
+            "global_overview": overview,
+            "search_query_stats": stats,
+            "listings_format": "id | title | block | size | price",
+            "listings": rows,
+            "listings_not_shown": max(0, len(filtered) - limit),
         }
     except Exception as e:
         return {"error": f"API engine execution failed: {str(e)}"}
@@ -155,6 +174,7 @@ TOOLS = [
                     "max_price": {"type": ["number", "null"], "description": "Maximum budget in PKR."},
                     "category": {"type": ["string", "null"], "description": "Type of property, e.g., 'Commercial', 'Residential'."},
                     "search_keyword": {"type": ["string", "null"], "description": "Specific search term like plot number, street name, or feature keyword."},
+                    "limit": {"type": ["integer", "null"], "description": "How many listings to return. Default 8. Use 1000 when the user asks for all / every / the full list of listings."},
                     "sort_order": {"type": ["string", "null"], "enum": ["highest_price", "lowest_price", None], "description": "Use 'highest_price' for most expensive / top listings and 'lowest_price' for cheapest listings. The first items of top_matching_listings_sample are then the actual extremes."},
                 },
                 "required": [],
