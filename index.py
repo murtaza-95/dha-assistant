@@ -4,10 +4,12 @@ import re
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from groq import Groq
 from pydantic import BaseModel
 
 from engine import AVAILABLE_TOOLS, TOOLS
+from page import HTML
 from prompts import MASTER_SYSTEM_PROMPT
 
 MODEL_NAME = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
@@ -29,6 +31,11 @@ class ChatRequest(BaseModel):
 def strip_thinking(text: str) -> str:
     """Remove <think>...</think> blocks some reasoning models emit."""
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return HTML
 
 
 @app.get("/api/health")
