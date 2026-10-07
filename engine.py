@@ -2,7 +2,7 @@ import re
 import requests
 from collections import Counter
 
-ENGINE_VERSION = "v3-area-unit-fix"
+ENGINE_VERSION = "v4-lean-tokens"
 API_ENDPOINT = "https://api.dhaconnects.com/api/plots/public/dha-lahore-phase-8/listings/"
 
 
@@ -88,7 +88,7 @@ def size_match(query, item_size):
 
 
 def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
-                          category=None, search_keyword=None, sort_order=None, limit=8):
+                          category=None, search_keyword=None, sort_order=None, limit=8, count_only=False, breakdown=False):
     """Fetch listings, compute global stats, apply filters, return compact JSON."""
     try:
         response = requests.get(API_ENDPOINT, timeout=12)
@@ -182,15 +182,17 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
             "average_price_overall": format_pkr(sum(all_numeric_prices) / len(all_numeric_prices)) if all_numeric_prices else "N/A",
         }
 
+        if count_only:
+            return {"total_db_listings": len(normalized_db), "search_query_stats": stats}
+
         if limit <= 8:
-            return {
-                "global_overview": overview,
-                "listings_per_block_breakdown": dict(block_counter),
-                "listings_per_size_breakdown": dict(size_counter),
-                "category_breakdown": dict(category_counter),
-                "search_query_stats": stats,
-                "top_matching_listings_sample": filtered[:limit],
-            }
+            out = {"global_overview": overview, "search_query_stats": stats,
+                   "top_matching_listings_sample": filtered[:limit]}
+            if breakdown:
+                out["listings_per_block_breakdown"] = dict(block_counter)
+                out["listings_per_size_breakdown"] = dict(size_counter)
+                out["category_breakdown"] = dict(category_counter)
+            return out
 
         # Full-list mode: compact one-line rows to save tokens
         rows = [f"{i['id']} | {i['title']} | plot {i['plot']} | {i['block']} | {i['size']} | {i['price_formatted']}" for i in filtered[:limit]]
@@ -221,6 +223,8 @@ TOOLS = [
                     "category": {"type": ["string", "null"], "description": "Type of property, e.g., 'Commercial', 'Residential'."},
                     "search_keyword": {"type": ["string", "null"], "description": "Specific search term like plot number, street name, or feature keyword."},
                     "limit": {"type": ["integer", "null"], "description": "How many listings to return. Default 8. Use 1000 when the user asks for all / every / the full list of listings."},
+                    "count_only": {"type": ["boolean", "null"], "description": "Set true when the user only asks how many / total number / count. Returns just the numbers (cheap)."},
+                    "breakdown": {"type": ["boolean", "null"], "description": "Set true only when the user asks for a breakdown or summary per block, size or category."},
                     "sort_order": {"type": ["string", "null"], "enum": ["highest_price", "lowest_price", None], "description": "Use 'highest_price' for most expensive / top listings and 'lowest_price' for cheapest listings. The first items of top_matching_listings_sample are then the actual extremes."},
                 },
                 "required": [],

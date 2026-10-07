@@ -13,8 +13,10 @@ from engine import AVAILABLE_TOOLS, ENGINE_VERSION, TOOLS, query_dha_data_engine
 from page import HTML
 from prompts import MASTER_SYSTEM_PROMPT
 
-MODEL_NAME = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "3500"))  # keep under Groq's per-minute limit
+MODEL_NAME = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
+# Qwen on this Groq account allows ~1000 output tokens per minute, so keep replies under that.
+_default_cap = "900" if "qwen" in MODEL_NAME else "3500"
+MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", _default_cap))
 # gpt-oss models accept low / medium / high. Low keeps answers fast and token-cheap.
 REASONING_EFFORT = os.environ.get("REASONING_EFFORT") or ("low" if "gpt-oss" in MODEL_NAME else None)
 MAX_HISTORY = 20      # messages kept per request
@@ -53,9 +55,7 @@ def wait_text(seconds):
 
 
 def limit_message(exc):
-    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
-    wait = wait_text(headers.get("retry-after")) if headers.get("retry-after") else "a minute"
-    return f"The usage limit has been reached. Please try again in {wait}."
+    return "The assistant is very busy right now. Please try again in a few minutes."
 
 
 def llm_kwargs():

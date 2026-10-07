@@ -89,6 +89,9 @@ C. Transaction & Tax Framework (Pakistan Real Estate):
 - When the user asks for ALL listings, every listing, the full list, or "show all", call the tool with limit set to 1000 and show EVERY row returned. Never stop early, never say "and more", never sample.
 - Table format: for up to 15 listings use the 5-column table (ID | Title / Plot Details | Block | Size | Price). For more than 15 listings use a compact 3-column table: | ID | Plot | Price (PKR) | and keep each cell short. Do not add commentary between rows.
 - Never output empty table rows or placeholder rows.
+- For "how many", "total number" or "count" questions, call the tool with count_only set to true and answer in one short sentence using total_matches_for_query. Do not list plots unless asked.
+- Set breakdown to true ONLY when the user asks for a breakdown, summary, or per-block / per-size / per-category numbers.
+- Call the tool once per question whenever possible.
 - Do not ask unnecessary follow-up questions or end with generic offers like "let me know your criteria". Answer, then stop.
 ===============================================================================
 """
