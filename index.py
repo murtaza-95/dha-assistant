@@ -1,11 +1,12 @@
 import json
 import os
 import re
+import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from groq import APIStatusError, Groq, RateLimitError
+from groq import APIConnectionError, APIStatusError, APITimeoutError, Groq, RateLimitError
 from pydantic import BaseModel
 
 from engine import AVAILABLE_TOOLS, ENGINE_VERSION, TOOLS, query_dha_data_engine
@@ -93,7 +94,15 @@ def chat(req: ChatRequest):
     if not req.messages or req.messages[-1].role != "user":
         raise HTTPException(400, "Last message must be from the user.")
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, max_retries=0)
+    started = time.monotonic()
+
+    def time_left():
+        """Seconds left before Vercel's 60s limit, keeping a 5s safety margin."""
+        left = 55 - (time.monotonic() - started)
+        if left < 6:
+            raise HTTPException(504, "This is taking too long. Please try again in a moment.")
+        return left
     history = [{"role": "system", "content": MASTER_SYSTEM_PROMPT}]
     history += [m.model_dump() for m in req.messages[-MAX_HISTORY:]]
 
@@ -101,7 +110,8 @@ def chat(req: ChatRequest):
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             resp = client.chat.completions.create(
-                messages=history, tools=TOOLS, tool_choice="auto", **llm_kwargs()
+                messages=history, tools=TOOLS, tool_choice="auto",
+                timeout=min(30, time_left()), **llm_kwargs()
             )
             msg = resp.choices[0].message
 
@@ -133,11 +143,13 @@ def chat(req: ChatRequest):
                 })
 
         # Tool rounds exhausted: force a final text answer
-        final = client.chat.completions.create(messages=history, **llm_kwargs())
+        final = client.chat.completions.create(messages=history, timeout=min(30, time_left()), **llm_kwargs())
         return {"reply": strip_thinking(final.choices[0].message.content), "filters_used": filters_used}
 
     except HTTPException:
         raise
+    except (APITimeoutError, APIConnectionError):
+        raise HTTPException(504, "The assistant took too long to respond. Please try again in a moment.")
     except RateLimitError as e:
         raise HTTPException(429, limit_message(e))
     except APIStatusError as e:
