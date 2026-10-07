@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHA Phase 8 Property Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+:root{
+  --bg:#eef1ee; --panel:#ffffff; --ink:#15201b; --muted:#5d6b64;
+  --line:#d6ddd8; --green:#1f5a44; --green-dark:#12372a; --brass:#a67c2e; --user:#12372a;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0f1713; --panel:#17211c; --ink:#e8efe9; --muted:#9baba2;
+  --line:#2a3a32; --green:#5fb08e; --green-dark:#0b120f; --brass:#d1a54a; --user:#1f5a44;}
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:'Schibsted Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--ink);
+  display:grid;grid-template-columns:300px 1fr;line-height:1.55}
+aside{background:var(--green-dark);color:#e8efe9;padding:32px 24px;display:flex;flex-direction:column;gap:28px;overflow-y:auto}
+aside h1{font-size:1.55rem;line-height:1.15;margin:0;font-weight:700;letter-spacing:-.01em}
+aside h1 span{display:block;color:var(--brass);font-weight:500;font-size:1rem;margin-top:8px;letter-spacing:0}
+aside p{margin:0;color:#a9bbb1;font-size:.9rem}
+.prompts{display:flex;flex-direction:column;gap:8px}
+.prompts button{all:unset;cursor:pointer;padding:10px 12px;border:1px solid #2f4b3e;border-radius:6px;font-size:.88rem;color:#e8efe9}
+.prompts button:hover{background:#1b3a2d;border-color:var(--brass)}
+.prompts button:focus-visible,#send:focus-visible,textarea:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+main{display:flex;flex-direction:column;height:100vh;min-width:0}
+#log{flex:1;overflow-y:auto;padding:28px clamp(16px,5vw,64px);display:flex;flex-direction:column;gap:18px}
+.msg{max-width:min(820px,100%)}
+.msg.user{align-self:flex-end;background:var(--user);color:#fff;padding:10px 16px;border-radius:14px 14px 2px 14px;white-space:pre-wrap}
+.msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line);padding:14px 18px;border-radius:2px 14px 14px 14px;overflow-x:auto}
+.msg.bot>:first-child{margin-top:0}.msg.bot>:last-child{margin-bottom:0}
+.msg.bot table{border-collapse:collapse;margin:10px 0;font-size:.88rem;min-width:100%}
+.msg.bot th,.msg.bot td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.msg.bot th{background:color-mix(in srgb,var(--green) 12%,transparent)}
+.tag{display:block;font-size:.75rem;color:var(--muted);margin-top:10px}
+.empty{margin:auto;text-align:center;color:var(--muted);max-width:360px}
+.empty b{display:block;color:var(--ink);font-size:1.2rem;margin-bottom:6px}
+.dots span{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:var(--muted);animation:b 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25}40%{opacity:1}}
+form{display:flex;gap:10px;padding:14px clamp(16px,5vw,64px) 20px;border-top:1px solid var(--line);background:var(--panel)}
+textarea{flex:1;resize:none;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-height:140px}
+#send{font:inherit;font-weight:500;background:var(--green);color:#fff;border:0;border-radius:8px;padding:0 22px;cursor:pointer}
+#send:disabled{opacity:.5;cursor:default}
+@media(max-width:800px){
+  body{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+  aside{padding:16px;gap:12px}
+  aside p{display:none}
+  .prompts{flex-direction:row;overflow-x:auto}
+  .prompts button{white-space:nowrap}
+  main{height:auto;min-height:0;overflow:hidden}
+  body{height:100dvh}
+}
+@media(prefers-reduced-motion:reduce){.dots span{animation:none}}
+</style>
+</head>
+<body>
+<aside>
+  <h1>DHA Lahore Phase 8<span>Property Assistant</span></h1>
+  <p>Live plot listings, price ranges and block statistics, plus answers on land units, file types and transfer costs.</p>
+  <div class="prompts" id="prompts">
+    <button>How many listings are there in total?</button>
+    <button>Show 1 Kanal plots in Block W under 5 Crore</button>
+    <button>Block-wise listing breakdown</button>
+    <button>Commercial vs residential prices</button>
+    <button>How many sq ft is 1 Kanal?</button>
+  </div>
+</aside>
+<main>
+  <div id="log" aria-live="polite">
+    <div class="empty" id="empty"><b>Ask about a plot</b>Try a block, size and budget, for example "10 Marla in Block A under 2 Crore".</div>
+  </div>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Ask about plots, prices or DHA procedures" aria-label="Message"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</main>
+<script>
+const log = document.getElementById('log'), input = document.getElementById('input'),
+      send = document.getElementById('send'), form = document.getElementById('form');
+let messages = [];
+
+function add(role, html, text) {
+  document.getElementById('empty')?.remove();
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  if (html) d.innerHTML = html; else d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+async function ask(text) {
+  text = text.trim(); if (!text) return;
+  input.value = ''; input.style.height = 'auto';
+  send.disabled = true;
+  messages.push({role:'user', content:text});
+  add('user', null, text);
+  const wait = add('bot', '<span class="dots"><span></span><span></span><span></span></span>');
+  try {
+    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({messages})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+    messages.push({role:'assistant', content:data.reply});
+    let html = DOMPurify.sanitize(marked.parse(data.reply));
+    if (data.filters_used?.length) {
+      const f = data.filters_used.map(o => Object.entries(o).map(([k,v]) => k.replace('_',' ')+': '+v).join(', ') || 'no filters').join(' | ');
+      html += '<span class="tag">Live listings queried with ' + DOMPurify.sanitize(f) + '</span>';
+    }
+    wait.innerHTML = html;
+  } catch (e) {
+    messages.pop();
+    wait.textContent = 'Could not get a reply: ' + e.message + '. Check your connection and send the message again.';
+  }
+  send.disabled = false; input.focus(); log.scrollTop = log.scrollHeight;
+}
+
+form.addEventListener('submit', e => { e.preventDefault(); ask(input.value); });
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; });
+document.getElementById('prompts').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') ask(e.target.textContent); });
+</script>
+</body>
+</html>
