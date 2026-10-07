@@ -2,6 +2,7 @@ import re
 import requests
 from collections import Counter
 
+ENGINE_VERSION = "v3-area-unit-fix"
 API_ENDPOINT = "https://api.dhaconnects.com/api/plots/public/dha-lahore-phase-8/listings/"
 
 
@@ -45,6 +46,47 @@ def extract_field(item, possible_keys, default="N/A"):
     return default
 
 
+def norm(x):
+    """Lowercase and remove all spaces/dashes so '1 Kanal' matches '1Kanal'."""
+    return re.sub(r"[\s\-_]+", "", str(x).lower())
+
+
+def clean_block(val):
+    """'Block X' / 'x' / 'CCA 3' / 'CCA3' / 'CCA-3'  ->  'X' / 'X' / 'CCA-3'"""
+    b = str(val).strip().upper()
+    b = re.sub(r"^BLOCK[\s\-]*", "", b).strip()
+    b = re.sub(r"^CCA[\s\-]*(\d)", r"CCA-\1", b)
+    return b or "Unspecified"
+
+
+def build_size(raw):
+    """Combine area + areaUnit into e.g. '1 Kanal' / '23.37 Marla'."""
+    area = raw.get("area") or raw.get("size") or raw.get("plot_size")
+    unit = raw.get("areaUnit") or raw.get("area_unit") or raw.get("unit") or ""
+    if area is None or str(area).strip() == "":
+        return "Unspecified"
+    try:
+        area = f"{float(str(area).replace(',', '')):g}"
+    except ValueError:
+        area = str(area).strip()
+    return f"{area} {str(unit).strip().title()}".strip()
+
+
+def block_match(query, item_block):
+    q = re.sub(r"^block", "", norm(query))
+    b = norm(item_block)
+    if b == q:
+        return True
+    # "CCA" with no number means every CCA sector
+    return q == "cca" and b.startswith("cca")
+
+
+def size_match(query, item_size):
+    """Match sizes without letting '1kanal' match '21kanal' or '5marla' match '15marla'."""
+    q, v = norm(query), norm(item_size)
+    return re.search(r"(?<![\d.])" + re.escape(q), v) is not None
+
+
 def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
                           category=None, search_keyword=None, sort_order=None, limit=8):
     """Fetch listings, compute global stats, apply filters, return compact JSON."""
@@ -70,10 +112,12 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
             if not isinstance(raw, dict):
                 continue
 
-            b_name = str(extract_field(raw, ["block", "phase_block", "block_name", "sector"], "Unspecified")).strip().upper()
-            s_val = str(extract_field(raw, ["size", "marla_size", "area", "plot_size"], "Unspecified")).strip()
-            cat_val = str(extract_field(raw, ["type", "category", "property_type", "purpose"], "Residential")).strip()
-            title_val = str(extract_field(raw, ["title", "name", "plot_number", "plot_no", "description"], f"Plot #{idx+1}")).strip()
+            b_name = clean_block(extract_field(raw, ["sector", "block", "phase_block", "block_name"], "Unspecified"))
+            s_val = build_size(raw)
+            cat_val = str(extract_field(raw, ["landUse", "land_use", "property_type", "type"], "Residential")).strip().title()
+            sub_val = str(extract_field(raw, ["subType", "sub_type", "type"], "Plot")).strip()
+            title_val = str(extract_field(raw, ["title", "name", "description"], f"Plot #{idx+1}")).strip()
+            plot_val = str(extract_field(raw, ["plotnum", "plot_number", "plot_no", "plot"], "")).strip()
 
             p_raw = extract_field(raw, ["price", "demand", "amount", "total_price"], None)
             p_numeric = parse_price_to_numeric(p_raw)
@@ -87,26 +131,28 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
             normalized_db.append({
                 "id": extract_field(raw, ["id", "pk", "listing_id"], idx + 1),
                 "title": title_val,
+                "plot": plot_val,
                 "block": b_name,
                 "size": s_val,
                 "category": cat_val,
+                "type": sub_val,
                 "price_pkr": p_numeric,
                 "price_formatted": format_pkr(p_numeric) if p_numeric else str(p_raw),
             })
 
         filtered = []
         for item in normalized_db:
-            if block and str(block).strip().upper() not in item["block"]:
+            if block and not block_match(block, item["block"]):
                 continue
-            if size and str(size).strip().lower() not in item["size"].lower():
+            if size and not size_match(size, item["size"]):
                 continue
-            if category and str(category).strip().lower() not in item["category"].lower():
+            if category and norm(category) not in norm(item["category"]) and norm(category) not in norm(item["type"]):
                 continue
             if min_price and (item["price_pkr"] is None or item["price_pkr"] < min_price):
                 continue
             if max_price and (item["price_pkr"] is None or item["price_pkr"] > max_price):
                 continue
-            if search_keyword and str(search_keyword).strip().lower() not in item["title"].lower():
+            if search_keyword and norm(search_keyword) not in norm(item["title"] + item["plot"] + item["type"]):
                 continue
             filtered.append(item)
 
@@ -147,11 +193,11 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
             }
 
         # Full-list mode: compact one-line rows to save tokens
-        rows = [f"{i['id']} | {i['title']} | {i['block']} | {i['size']} | {i['price_formatted']}" for i in filtered[:limit]]
+        rows = [f"{i['id']} | {i['title']} | plot {i['plot']} | {i['block']} | {i['size']} | {i['price_formatted']}" for i in filtered[:limit]]
         return {
             "global_overview": overview,
             "search_query_stats": stats,
-            "listings_format": "id | title | block | size | price",
+            "listings_format": "id | title | plot | block | size | price",
             "listings": rows,
             "listings_not_shown": max(0, len(filtered) - limit),
         }

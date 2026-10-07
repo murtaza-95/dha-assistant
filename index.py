@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from groq import APIStatusError, Groq, RateLimitError
 from pydantic import BaseModel
 
-from engine import AVAILABLE_TOOLS, TOOLS
+from engine import AVAILABLE_TOOLS, ENGINE_VERSION, TOOLS, query_dha_data_engine
 from page import HTML
 from prompts import MASTER_SYSTEM_PROMPT
 
@@ -71,7 +71,18 @@ def home():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "model": MODEL_NAME, "key_set": bool(os.environ.get("GROQ_API_KEY"))}
+    return {"status": "ok", "model": MODEL_NAME, "engine_version": ENGINE_VERSION,
+            "key_set": bool(os.environ.get("GROQ_API_KEY"))}
+
+
+@app.get("/api/test")
+def test(block: str = None, size: str = None, category: str = None, keyword: str = None):
+    """Shows what the listing search returns, with no AI involved. Example: /api/test?size=1%20Kanal"""
+    r = query_dha_data_engine(block=block, size=size, category=category,
+                              search_keyword=keyword, limit=100)
+    return {"engine_version": ENGINE_VERSION,
+            "search": {"block": block, "size": size, "category": category, "keyword": keyword},
+            "result": r}
 
 
 @app.post("/api/chat")
