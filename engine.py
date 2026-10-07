@@ -46,7 +46,7 @@ def extract_field(item, possible_keys, default="N/A"):
 
 
 def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
-                          category=None, search_keyword=None):
+                          category=None, search_keyword=None, sort_order=None):
     """Fetch listings, compute global stats, apply filters, return compact JSON."""
     try:
         response = requests.get(API_ENDPOINT, timeout=12)
@@ -110,6 +110,12 @@ def query_dha_data_engine(block=None, size=None, min_price=None, max_price=None,
                 continue
             filtered.append(item)
 
+        if sort_order in ("highest_price", "lowest_price"):
+            priced = [i for i in filtered if i["price_pkr"]]
+            unpriced = [i for i in filtered if not i["price_pkr"]]
+            priced.sort(key=lambda i: i["price_pkr"], reverse=(sort_order == "highest_price"))
+            filtered = priced + unpriced
+
         fp = [i["price_pkr"] for i in filtered if i["price_pkr"]]
 
         return {
@@ -149,6 +155,7 @@ TOOLS = [
                     "max_price": {"type": ["number", "null"], "description": "Maximum budget in PKR."},
                     "category": {"type": ["string", "null"], "description": "Type of property, e.g., 'Commercial', 'Residential'."},
                     "search_keyword": {"type": ["string", "null"], "description": "Specific search term like plot number, street name, or feature keyword."},
+                    "sort_order": {"type": ["string", "null"], "enum": ["highest_price", "lowest_price", None], "description": "Use 'highest_price' for most expensive / top listings and 'lowest_price' for cheapest listings. The first items of top_matching_listings_sample are then the actual extremes."},
                 },
                 "required": [],
             },
